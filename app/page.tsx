@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { PlusCircle, Trash2, Clock, AlertCircle, Plus, Minus, Pause, Play, Edit, Check } from "lucide-react"
+import { PlusCircle, Trash2, Clock, AlertCircle, Plus, Minus, Pause, Play, Edit, Check, Calendar } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -23,10 +23,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { toast } from "@/hooks/use-toast"
-import { Toaster } from "@/components/ui/toaster"
+import { toast } from "sonner"
+import { Toaster } from "sonner"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 
-// Task type definition with nice value and time quantum
+// Process class type
+type ProcessClass = "deadline" | "realtime" | "normal"
+
+// Real-time scheduling algorithm
+type RTSchedulingAlgorithm = "fifo" | "rr"
+
+// Routine type
+type RoutineType = "default" | "daily"
+
+// Task type definition with scheduling properties
 type Task = {
   id: string
   title: string
@@ -34,11 +44,18 @@ type Task = {
   priority: number
   createdAt: Date
   startedAt?: Date
-  category: "long-term" | "medium-term" | "short-term"
-  niceValue: number
+  processClass: ProcessClass
+  // Deadline process properties
+  deadline?: Date
+  // Real-time process properties
+  rtAlgorithm?: RTSchedulingAlgorithm
+  // Normal process properties (CFS)
+  niceValue?: number
+  vruntime?: number
+  routineType?: RoutineType
+  // Common properties
   timeQuantum: number // in minutes
   elapsedTime: number // in seconds
-  vruntime: number // virtual runtime
   isPaused?: boolean
 }
 
@@ -47,11 +64,20 @@ type CompletedTask = {
   id: string
   title: string
   description: string
-  category: "long-term" | "medium-term" | "short-term"
+  processClass: ProcessClass
   completedAt: Date
   totalTime: number // in seconds
-  niceValue: number
+  deadline?: Date
+  rtAlgorithm?: RTSchedulingAlgorithm
+  niceValue?: number
+  routineType?: RoutineType
 }
+
+// Radio group value type
+type RadioGroupValue = RTSchedulingAlgorithm | RoutineType
+
+// Slider value type
+type SliderValue = number[]
 
 export default function Home() {
   // State for tasks and current task
@@ -61,62 +87,22 @@ export default function Home() {
       const savedTasks = localStorage.getItem("tasks")
       if (savedTasks) {
         return JSON.parse(savedTasks, (key, value) => {
-          if (key === "createdAt" || key === "startedAt") {
+          if (key === "createdAt" || key === "startedAt" || key === "deadline") {
             return value ? new Date(value) : null
           }
           return value
         })
       }
     }
-
-    return [
-      {
-        id: "1",
-        title: "Complete project proposal",
-        description: "Draft and finalize the project proposal for the client",
-        priority: 1,
-        createdAt: new Date(),
-        startedAt: new Date(Date.now() - 1000 * 60 * 30), // Started 30 minutes ago
-        category: "short-term",
-        niceValue: 0,
-        timeQuantum: 60, // 60 minutes
-        elapsedTime: 30 * 60, // 30 minutes in seconds
-        vruntime: 30 * 60 * 1024, // basic vruntime calculation
-      },
-      {
-        id: "2",
-        title: "Research market trends",
-        description: "Analyze current market trends for the upcoming strategy meeting",
-        priority: 2,
-        createdAt: new Date(),
-        category: "medium-term",
-        niceValue: -5,
-        timeQuantum: 120, // 120 minutes
-        elapsedTime: 0,
-        vruntime: 0,
-      },
-      {
-        id: "3",
-        title: "Learn a new programming language",
-        description: "Study and practice a new programming language for skill development",
-        priority: 3,
-        createdAt: new Date(),
-        category: "long-term",
-        niceValue: 10,
-        timeQuantum: 240, // 240 minutes
-        elapsedTime: 0,
-        vruntime: 0,
-      },
-    ]
+    return []
   })
 
-  // State for completed tasks
   const [completedTasks, setCompletedTasks] = useState<CompletedTask[]>(() => {
     if (typeof window !== "undefined") {
       const savedCompletedTasks = localStorage.getItem("completedTasks")
       if (savedCompletedTasks) {
         return JSON.parse(savedCompletedTasks, (key, value) => {
-          if (key === "completedAt") {
+          if (key === "completedAt" || key === "deadline") {
             return value ? new Date(value) : null
           }
           return value
@@ -127,21 +113,38 @@ export default function Home() {
   })
 
   const [currentTask, setCurrentTask] = useState<Task | null>(null)
-  const [newTaskTitle, setNewTaskTitle] = useState("")
-  const [newTaskDescription, setNewTaskDescription] = useState("")
-  const [newTaskCategory, setNewTaskCategory] = useState<"long-term" | "medium-term" | "short-term">("short-term")
-  const [newTaskNiceValue, setNewTaskNiceValue] = useState(0)
-  const [newTaskTimeQuantum, setNewTaskTimeQuantum] = useState(60) // Default 60 minutes
-  const [elapsedTime, setElapsedTime] = useState(0)
+  const [newTaskTitle, setNewTaskTitle] = useState<string>("")
+  const [newTaskDescription, setNewTaskDescription] = useState<string>("")
+  const [newTaskProcessClass, setNewTaskProcessClass] = useState<ProcessClass>("normal")
+  const [newTaskDeadline, setNewTaskDeadline] = useState<string>(() => {
+    const date = new Date()
+    date.setDate(date.getDate() + 7) // Default deadline: 7 days from now
+    return date.toISOString().split("T")[0]
+  })
+  const [newTaskRTAlgorithm, setNewTaskRTAlgorithm] = useState<RTSchedulingAlgorithm>("fifo")
+  const [newTaskNiceValue, setNewTaskNiceValue] = useState<number>(0)
+  const [newTaskTimeQuantum, setNewTaskTimeQuantum] = useState<number>(60)  // Default 60 minutes
+  const [elapsedTime, setElapsedTime] = useState<number>(0)
+  const [newTaskRoutineType, setNewTaskRoutineType] = useState<RoutineType>("default")
+  const [newTaskDeadlineTime, setNewTaskDeadlineTime] = useState<string>("12:00")
 
   // State for dialogs
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [isTaskSwitchDialogOpen, setIsTaskSwitchDialogOpen] = useState(false)
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState<boolean>(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState<boolean>(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState<boolean>(false)
+  const [isTaskSwitchDialogOpen, setIsTaskSwitchDialogOpen] = useState<boolean>(false)
   const [taskToEdit, setTaskToEdit] = useState<Task | null>(null)
   const [taskToDelete, setTaskToDelete] = useState<string | null>(null)
   const [taskToSwitch, setTaskToSwitch] = useState<string | null>(null)
+  const [completedDailyRoutines, setCompletedDailyRoutines] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      const savedCompletedRoutines = localStorage.getItem("completedDailyRoutines")
+      if (savedCompletedRoutines) {
+        return JSON.parse(savedCompletedRoutines)
+      }
+    }
+    return []
+  })
 
   // Timer reference
   const timerRef = useRef<NodeJS.Timeout | null>(null)
@@ -151,15 +154,39 @@ export default function Home() {
     const task = tasks.find((t) => t.id === id)
     if (!task) return
 
+    // For daily routine tasks, add to completedDailyRoutines instead of removing
+    if (task.processClass === "normal" && task.routineType === "daily") {
+      setCompletedDailyRoutines((prev) => {
+        const updated = [...prev, task.id]
+        localStorage.setItem("completedDailyRoutines", JSON.stringify(updated))
+        return updated
+      })
+
+      // If it's the current task, clear it
+      if (currentTask?.id === id) {
+        setCurrentTask(null)
+      }
+
+      toast.success("Daily Routine Completed", {
+        description: `"${task.title}" has been completed for today.`,
+      })
+
+      return
+    }
+
+    // For non-daily routine tasks, proceed as before
     // Add to completed tasks
     const completedTask: CompletedTask = {
       id: task.id,
       title: task.title,
       description: task.description,
-      category: task.category,
+      processClass: task.processClass,
       completedAt: new Date(),
       totalTime: task.elapsedTime,
+      deadline: task.deadline,
+      rtAlgorithm: task.rtAlgorithm,
       niceValue: task.niceValue,
+      routineType: task.routineType,
     }
 
     setCompletedTasks([completedTask, ...completedTasks])
@@ -172,31 +199,50 @@ export default function Home() {
     }
 
     // Show notification
-    toast({
-      title: "Task Completed",
+    toast.success("Task Completed", {
       description: `"${task.title}" has been completed.`,
-      variant: "default",
     })
   }
 
   // Calculate weight based on nice value (CFS formula)
   const calculateWeight = (niceValue: number): number => {
     // In CFS, weight is calculated as 1024 / (1.25^nice)
-    return 1024 / Math.pow(1.25, niceValue)
+    return 1024 / Math.pow(1.25, niceValue || 0)
   }
 
-  // Fix the vruntime calculation formula to match: vruntime = 1.25^(nice value) × (task execution time)
-  // Replace the calculateVRuntime function with:
-
+  // Calculate virtual runtime for normal processes
   const calculateVRuntime = (elapsedTimeSeconds: number, niceValue: number): number => {
-    return Math.floor(Math.pow(1.25, niceValue) * elapsedTimeSeconds)
+    return Math.floor(Math.pow(1.25, niceValue || 0) * elapsedTimeSeconds)
   }
 
-  // Calculate virtual runtime
-  // const calculateVRuntime = (elapsedTimeSeconds: number, niceValue: number): number => {
-  //   const weight = calculateWeight(niceValue)
-  //   return Math.floor(elapsedTimeSeconds * (1024 / weight))
-  // }
+  // Get time until deadline in seconds
+  const getTimeUntilDeadline = (deadline: Date): number => {
+    const now = new Date()
+    return Math.max(0, Math.floor((deadline.getTime() - now.getTime()) / 1000))
+  }
+
+  // Format deadline display
+  const formatDeadline = (deadline: Date): string => {
+    const now = new Date()
+    const diffTime = deadline.getTime() - now.getTime()
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+    const timeStr = deadline.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+
+    if (diffDays <= 0) {
+      return `Overdue! (${timeStr})`
+    } else if (diffDays === 1) {
+      return `Due tomorrow at ${timeStr}`
+    } else if (diffDays < 7) {
+      return `Due in ${diffDays} days at ${timeStr}`
+    } else {
+      return `${new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).format(deadline)} at ${timeStr}`
+    }
+  }
 
   // Save tasks to localStorage whenever they change
   useEffect(() => {
@@ -204,12 +250,11 @@ export default function Home() {
 
     // Set the current task to the highest priority task if none is selected
     if (!currentTask && tasks.length > 0) {
-      const highestPriorityTask = [...tasks]
-        .filter((task) => !task.startedAt)
-        .sort((a, b) => a.vruntime - b.vruntime)[0]
+      // Get the next task based on scheduling priority
+      const nextTask = getNextTaskToRun()
 
-      if (highestPriorityTask) {
-        startTask(highestPriorityTask.id)
+      if (nextTask) {
+        startTask(nextTask.id)
       }
     }
   }, [tasks, currentTask])
@@ -219,9 +264,7 @@ export default function Home() {
     localStorage.setItem("completedTasks", JSON.stringify(completedTasks))
   }, [completedTasks])
 
-  // Fix the timer logic to increment exactly 1 second per second
-  // Replace the useEffect for updating elapsed time with this simplified version:
-
+  // Timer logic for updating elapsed time
   useEffect(() => {
     if (!currentTask?.startedAt || currentTask?.isPaused) return
 
@@ -252,11 +295,17 @@ export default function Home() {
         setTasks((prevTasks) =>
           prevTasks.map((task) => {
             if (task.id === currentTask.id) {
-              return {
+              const updatedTask = {
                 ...task,
                 elapsedTime: finalElapsedTime,
-                vruntime: calculateVRuntime(finalElapsedTime, task.niceValue),
               }
+
+              // Update vruntime for normal processes
+              if (task.processClass === "normal" && task.niceValue !== undefined) {
+                updatedTask.vruntime = calculateVRuntime(finalElapsedTime, task.niceValue)
+              }
+
+              return updatedTask
             }
             return task
           }),
@@ -265,11 +314,18 @@ export default function Home() {
         // Update current task state
         setCurrentTask((prevTask) => {
           if (!prevTask) return null
-          return {
+
+          const updatedTask = {
             ...prevTask,
             elapsedTime: finalElapsedTime,
-            vruntime: calculateVRuntime(finalElapsedTime, prevTask.niceValue),
           }
+
+          // Update vruntime for normal processes
+          if (prevTask.processClass === "normal" && prevTask.niceValue !== undefined) {
+            updatedTask.vruntime = calculateVRuntime(finalElapsedTime, prevTask.niceValue)
+          }
+
+          return updatedTask
         })
 
         // Always show task switch dialog when time quantum is reached
@@ -287,11 +343,17 @@ export default function Home() {
       setTasks((prevTasks) =>
         prevTasks.map((task) => {
           if (task.id === currentTask.id) {
-            return {
+            const updatedTask = {
               ...task,
               elapsedTime: totalElapsed,
-              vruntime: calculateVRuntime(totalElapsed, task.niceValue),
             }
+
+            // Update vruntime for normal processes
+            if (task.processClass === "normal" && task.niceValue !== undefined) {
+              updatedTask.vruntime = calculateVRuntime(totalElapsed, task.niceValue)
+            }
+
+            return updatedTask
           }
           return task
         }),
@@ -300,11 +362,18 @@ export default function Home() {
       // Also update the currentTask state
       setCurrentTask((prevTask) => {
         if (!prevTask) return null
-        return {
+
+        const updatedTask = {
           ...prevTask,
           elapsedTime: totalElapsed,
-          vruntime: calculateVRuntime(totalElapsed, prevTask.niceValue),
         }
+
+        // Update vruntime for normal processes
+        if (prevTask.processClass === "normal" && prevTask.niceValue !== undefined) {
+          updatedTask.vruntime = calculateVRuntime(totalElapsed, prevTask.niceValue)
+        }
+
+        return updatedTask
       })
     }, 1000)
 
@@ -319,9 +388,17 @@ export default function Home() {
   const resetFormFields = () => {
     setNewTaskTitle("")
     setNewTaskDescription("")
-    setNewTaskCategory("short-term")
+    setNewTaskProcessClass("normal")
+
+    const date = new Date()
+    date.setDate(date.getDate() + 7) // Default deadline: 7 days from now
+    setNewTaskDeadline(date.toISOString().split("T")[0])
+    setNewTaskDeadlineTime("12:00")
+
+    setNewTaskRTAlgorithm("fifo")
     setNewTaskNiceValue(0)
     setNewTaskTimeQuantum(60)
+    setNewTaskRoutineType("default")
   }
 
   // Add a new task
@@ -334,26 +411,34 @@ export default function Home() {
       description: newTaskDescription,
       priority: tasks.length + 1,
       createdAt: new Date(),
-      category: newTaskCategory,
-      niceValue: newTaskNiceValue,
+      processClass: newTaskProcessClass,
       timeQuantum: newTaskTimeQuantum,
       elapsedTime: 0,
-      vruntime: 0,
+    }
+
+    // Add class-specific properties
+    if (newTaskProcessClass === "deadline") {
+      const deadlineDate = new Date(newTaskDeadline)
+      const [hours, minutes] = newTaskDeadlineTime.split(":").map(Number)
+      deadlineDate.setHours(hours, minutes)
+      newTask.deadline = deadlineDate
+    } else if (newTaskProcessClass === "realtime") {
+      newTask.rtAlgorithm = newTaskRTAlgorithm
+    } else if (newTaskProcessClass === "normal") {
+      newTask.niceValue = newTaskNiceValue
+      newTask.vruntime = 0
+      newTask.routineType = newTaskRoutineType
     }
 
     setTasks([...tasks, newTask])
 
     // Show notification
-    toast({
-      title: "Task Added",
-      description: `"${newTaskTitle}" has been added to your ${newTaskCategory} tasks.`,
+    toast.success("Task Added", {
+      description: `"${newTaskTitle}" has been added to your ${newTaskProcessClass} tasks.`,
     })
 
     resetFormFields()
   }
-
-  // Also update the editTask function to recalculate vruntime when nice value changes:
-  // Replace the editTask function with:
 
   // Edit a task
   const editTask = () => {
@@ -362,19 +447,44 @@ export default function Home() {
     setTasks(
       tasks.map((task) => {
         if (task.id === taskToEdit.id) {
-          // Recalculate vruntime if nice value changed
-          const newVruntime =
-            task.niceValue !== newTaskNiceValue ? calculateVRuntime(task.elapsedTime, newTaskNiceValue) : task.vruntime
-
-          const updatedTask = {
+          const updatedTask: Task = {
             ...task,
             title: newTaskTitle,
             description: newTaskDescription,
-            category: newTaskCategory,
-            niceValue: newTaskNiceValue,
+            processClass: newTaskProcessClass,
             timeQuantum: newTaskTimeQuantum,
-            vruntime: newVruntime,
           }
+
+          // Update class-specific properties
+          if (newTaskProcessClass === "deadline") {
+            updatedTask.deadline = new Date(newTaskDeadline)
+            // Remove properties from other classes
+            delete updatedTask.rtAlgorithm
+            delete updatedTask.niceValue
+            delete updatedTask.vruntime
+          } else if (newTaskProcessClass === "realtime") {
+            updatedTask.rtAlgorithm = newTaskRTAlgorithm
+            // Remove properties from other classes
+            delete updatedTask.deadline
+            delete updatedTask.niceValue
+            delete updatedTask.vruntime
+          } else if (newTaskProcessClass === "normal") {
+            // Recalculate vruntime if nice value changed
+            const newVruntime =
+              task.processClass === "normal" && task.niceValue !== newTaskNiceValue
+                ? calculateVRuntime(task.elapsedTime, newTaskNiceValue)
+                : task.processClass === "normal"
+                  ? task.vruntime
+                  : 0
+
+            updatedTask.niceValue = newTaskNiceValue
+            updatedTask.vruntime = newVruntime
+            updatedTask.routineType = newTaskRoutineType
+            // Remove properties from other classes
+            delete updatedTask.deadline
+            delete updatedTask.rtAlgorithm
+          }
+
           return updatedTask
         }
         return task
@@ -386,24 +496,50 @@ export default function Home() {
       setCurrentTask((prev) => {
         if (!prev) return null
 
-        const newVruntime =
-          prev.niceValue !== newTaskNiceValue ? calculateVRuntime(prev.elapsedTime, newTaskNiceValue) : prev.vruntime
-
-        return {
+        const updatedTask: Task = {
           ...prev,
           title: newTaskTitle,
           description: newTaskDescription,
-          category: newTaskCategory,
-          niceValue: newTaskNiceValue,
+          processClass: newTaskProcessClass,
           timeQuantum: newTaskTimeQuantum,
-          vruntime: newVruntime,
         }
+
+        // Update class-specific properties
+        if (newTaskProcessClass === "deadline") {
+          updatedTask.deadline = new Date(newTaskDeadline)
+          // Remove properties from other classes
+          delete updatedTask.rtAlgorithm
+          delete updatedTask.niceValue
+          delete updatedTask.vruntime
+        } else if (newTaskProcessClass === "realtime") {
+          updatedTask.rtAlgorithm = newTaskRTAlgorithm
+          // Remove properties from other classes
+          delete updatedTask.deadline
+          delete updatedTask.niceValue
+          delete updatedTask.vruntime
+        } else if (newTaskProcessClass === "normal") {
+          // Recalculate vruntime if nice value changed
+          const newVruntime =
+            prev.processClass === "normal" && prev.niceValue !== newTaskNiceValue
+              ? calculateVRuntime(prev.elapsedTime, newTaskNiceValue)
+              : prev.processClass === "normal"
+                ? prev.vruntime
+                : 0
+
+          updatedTask.niceValue = newTaskNiceValue
+          updatedTask.vruntime = newVruntime
+          updatedTask.routineType = newTaskRoutineType
+          // Remove properties from other classes
+          delete updatedTask.deadline
+          delete updatedTask.rtAlgorithm
+        }
+
+        return updatedTask
       })
     }
 
     // Show notification
-    toast({
-      title: "Task Updated",
+    toast.success("Task Updated", {
       description: `"${newTaskTitle}" has been updated.`,
     })
 
@@ -412,46 +548,27 @@ export default function Home() {
     resetFormFields()
   }
 
-  // Edit a task
-  // const editTask = () => {
-  //   if (!taskToEdit || !newTaskTitle.trim()) return
-
-  //   setTasks(
-  //     tasks.map((task) => {
-  //       if (task.id === taskToEdit.id) {
-  //         const updatedTask = {
-  //           ...task,
-  //           title: newTaskTitle,
-  //           description: newTaskDescription,
-  //           category: newTaskCategory,
-  //           niceValue: newTaskNiceValue,
-  //           timeQuantum: newTaskTimeQuantum,
-  //         }
-  //         return updatedTask
-  //       }
-  //       return task
-  //     }),
-  //   )
-
-  //   // Show notification
-  //   toast({
-  //     title: "Task Updated",
-  //     description: `"${newTaskTitle}" has been updated.`,
-  //   })
-
-  //   setIsEditDialogOpen(false)
-  //   setTaskToEdit(null)
-  //   resetFormFields()
-  // }
-
   // Open edit dialog
   const openEditDialog = (task: Task) => {
     setTaskToEdit(task)
     setNewTaskTitle(task.title)
     setNewTaskDescription(task.description)
-    setNewTaskCategory(task.category)
-    setNewTaskNiceValue(task.niceValue)
+    setNewTaskProcessClass(task.processClass)
     setNewTaskTimeQuantum(task.timeQuantum)
+
+    // Set class-specific properties
+    if (task.processClass === "deadline" && task.deadline) {
+      setNewTaskDeadline(task.deadline.toISOString().split("T")[0])
+      const hours = task.deadline.getHours().toString().padStart(2, "0")
+      const minutes = task.deadline.getMinutes().toString().padStart(2, "0")
+      setNewTaskDeadlineTime(`${hours}:${minutes}`)
+    } else if (task.processClass === "realtime" && task.rtAlgorithm) {
+      setNewTaskRTAlgorithm(task.rtAlgorithm)
+    } else if (task.processClass === "normal") {
+      setNewTaskNiceValue(task.niceValue || 0)
+      setNewTaskRoutineType(task.routineType || "default")
+    }
+
     setIsEditDialogOpen(true)
   }
 
@@ -472,10 +589,8 @@ export default function Home() {
     setTasks(tasks.filter((task) => task.id !== taskToDelete))
 
     // Show notification
-    toast({
-      title: "Task Deleted",
+    toast.error("Task Deleted", {
       description: "The task has been deleted.",
-      variant: "destructive",
     })
 
     setIsDeleteDialogOpen(false)
@@ -487,11 +602,42 @@ export default function Home() {
     setCompletedTasks(completedTasks.filter((task) => task.id !== id))
 
     // Show notification
-    toast({
-      title: "Completed Task Deleted",
+    toast.error("Completed Task Deleted", {
       description: "The completed task has been deleted.",
-      variant: "destructive",
     })
+  }
+
+  // Get the next task to run based on Linux scheduling priority
+  const getNextTaskToRun = (): Task | undefined => {
+    // 1. First check for deadline tasks (EDF - Earliest Deadline First)
+    const deadlineTasks = tasks.filter((task) => task.processClass === "deadline" && task.deadline && !task.startedAt)
+
+    if (deadlineTasks.length > 0) {
+      // Sort by earliest deadline
+      return deadlineTasks.sort((a, b) => {
+        if (!a.deadline || !b.deadline) return 0
+        return a.deadline.getTime() - b.deadline.getTime()
+      })[0]
+    }
+
+    // 2. Then check for real-time tasks
+    const realtimeTasks = tasks.filter((task) => task.processClass === "realtime" && !task.startedAt)
+
+    if (realtimeTasks.length > 0) {
+      // For FIFO, return the first task that was added
+      // For RR, we could implement more complex logic, but for simplicity, we'll use the same approach
+      return realtimeTasks.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0]
+    }
+
+    // 3. Finally, check for normal tasks (CFS)
+    const normalTasks = tasks.filter((task) => task.processClass === "normal" && !task.startedAt)
+
+    if (normalTasks.length > 0) {
+      // Sort by lowest vruntime
+      return normalTasks.sort((a, b) => (a.vruntime || 0) - (b.vruntime || 0))[0]
+    }
+
+    return undefined
   }
 
   // Start a task
@@ -580,8 +726,7 @@ export default function Home() {
       clearInterval(timerRef.current)
     }
 
-    toast({
-      title: "Task Paused",
+    toast.info("Task Paused", {
       description: `"${currentTask.title}" has been paused.`,
     })
   }
@@ -613,8 +758,7 @@ export default function Home() {
       }),
     )
 
-    toast({
-      title: "Task Resumed",
+    toast.info("Task Resumed", {
       description: `"${currentTask.title}" has been resumed.`,
     })
   }
@@ -643,8 +787,7 @@ export default function Home() {
       }
     })
 
-    toast({
-      title: "Time Quantum Added",
+    toast.success("Time Quantum Added", {
       description: `Added ${minutes} minutes to "${currentTask.title}".`,
     })
   }
@@ -657,10 +800,8 @@ export default function Home() {
     const remainingMinutes = Math.ceil(remainingSeconds / 60)
 
     if (minutes > remainingMinutes) {
-      toast({
-        title: "Cannot Reduce Time",
+      toast.error("Cannot Reduce Time", {
         description: `You cannot remove more than the remaining time (${remainingMinutes} minutes).`,
-        variant: "destructive",
       })
       return
     }
@@ -687,8 +828,7 @@ export default function Home() {
       }
     })
 
-    toast({
-      title: "Time Quantum Reduced",
+    toast.success("Time Quantum Reduced", {
       description: `Reduced ${minutes} minutes from "${currentTask.title}".`,
     })
   }
@@ -712,15 +852,41 @@ export default function Home() {
     }).format(date)
   }
 
-  // Get prioritized tasks for the ready queue sorted by vruntime
-  const readyQueueTasks = [...tasks]
-    .filter((task) => task.id !== currentTask?.id) // Exclude current task
-    .sort((a, b) => a.vruntime - b.vruntime)
-    .slice(0, 10)
+  // Get prioritized tasks for the ready queue based on Linux scheduling
+  const getReadyQueueTasks = (): Task[] => {
+    const tasksWithoutCurrent = tasks.filter((task) => {
+      // Filter out current task and completed daily routines
+      return (
+        task.id !== currentTask?.id &&
+        !(task.processClass === "normal" && task.routineType === "daily" && completedDailyRoutines.includes(task.id))
+      )
+    })
 
-  // Get tasks by category
-  const getTasksByCategory = (category: "long-term" | "medium-term" | "short-term") => {
-    return tasks.filter((task) => task.category === category)
+    // 1. First, deadline tasks sorted by earliest deadline
+    const deadlineTasks = tasksWithoutCurrent
+      .filter((task) => task.processClass === "deadline" && task.deadline)
+      .sort((a, b) => {
+        if (!a.deadline || !b.deadline) return 0
+        return a.deadline.getTime() - b.deadline.getTime()
+      })
+
+    // 2. Then, real-time tasks sorted by creation time (FIFO)
+    const realtimeTasks = tasksWithoutCurrent
+      .filter((task) => task.processClass === "realtime")
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+
+    // 3. Finally, normal tasks sorted by vruntime
+    const normalTasks = tasksWithoutCurrent
+      .filter((task) => task.processClass === "normal")
+      .sort((a, b) => (a.vruntime || 0) - (b.vruntime || 0))
+
+    // Combine all tasks in priority order
+    return [...deadlineTasks, ...realtimeTasks, ...normalTasks].slice(0, 10)
+  }
+
+  // Get tasks by process class
+  const getTasksByProcessClass = (processClass: ProcessClass) => {
+    return tasks.filter((task) => task.processClass === processClass)
   }
 
   // Calculate progress percentage
@@ -731,9 +897,69 @@ export default function Home() {
     return Math.min(progress, 100)
   }
 
+  // Get badge color based on process class
+  const getProcessClassBadgeColor = (processClass: ProcessClass): string => {
+    switch (processClass) {
+      case "deadline":
+        return "bg-red-100 text-red-800 border-red-200"
+      case "realtime":
+        return "bg-purple-100 text-purple-800 border-purple-200"
+      case "normal":
+        return "bg-sky-100 text-sky-800 border-sky-200"
+      default:
+        return ""
+    }
+  }
+
+  // Get process class display name
+  const getProcessClassDisplayName = (processClass: ProcessClass): string => {
+    switch (processClass) {
+      case "deadline":
+        return "Deadline"
+      case "realtime":
+        return "Real-Time"
+      case "normal":
+        return "Normal"
+      default:
+        return processClass
+    }
+  }
+
+  // Finish current task
+  const finishCurrentTask = () => {
+    if (!currentTask) return
+
+    completeTask(currentTask.id)
+  }
+
+  // Reset daily routines at 5 AM
+  useEffect(() => {
+    const checkForReset = () => {
+      const now = new Date()
+      if (now.getHours() === 5 && now.getMinutes() === 0) {
+        // Reset all daily routines
+        setCompletedDailyRoutines([])
+        localStorage.setItem("completedDailyRoutines", JSON.stringify([]))
+
+        toast.info("Daily Routines Reset", {
+          description: "All daily routines have been reset for the new day.",
+        })
+      }
+    }
+
+    // Check every minute
+    const intervalId = setInterval(checkForReset, 60000)
+
+    return () => clearInterval(intervalId)
+  }, [])
+
+  // Get ready queue tasks
+  const readyQueueTasks = getReadyQueueTasks()
+
   return (
     <main className="container mx-auto p-4 space-y-6">
-      <h1 className="text-3xl font-bold text-center mb-8">CFS-Based TODO Management (for Engineers)</h1>
+      <Toaster position="top-right" />
+      <h1 className="text-3xl font-bold text-center mb-8">Linux-Like TODO Management (for Engineers)</h1>
 
       {/* Current Task Section */}
       <Card className="border-2 border-sky-500">
@@ -755,9 +981,27 @@ export default function Home() {
                   <p className="text-muted-foreground mt-1">{currentTask.description}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <Badge>Priority: {currentTask.priority}</Badge>
-                  <Badge variant="outline">Nice: {currentTask.niceValue}</Badge>
-                  <Badge variant="secondary">VRuntime: {currentTask.vruntime.toLocaleString()}</Badge>
+                  <Badge className={getProcessClassBadgeColor(currentTask.processClass)}>
+                    {getProcessClassDisplayName(currentTask.processClass)}
+                  </Badge>
+
+                  {currentTask.processClass === "deadline" && currentTask.deadline && (
+                    <Badge variant="outline" className="text-red-600">
+                      <Calendar className="h-3 w-3 mr-1" />
+                      {formatDeadline(currentTask.deadline)}
+                    </Badge>
+                  )}
+
+                  {currentTask.processClass === "realtime" && currentTask.rtAlgorithm && (
+                    <Badge variant="outline">Algorithm: {currentTask.rtAlgorithm.toUpperCase()}</Badge>
+                  )}
+
+                  {currentTask.processClass === "normal" && currentTask.niceValue !== undefined && (
+                    <>
+                      <Badge variant="outline">Nice: {currentTask.niceValue}</Badge>
+                      <Badge variant="secondary">VRuntime: {currentTask.vruntime?.toLocaleString() || 0}</Badge>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -809,7 +1053,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-center">
+              <div className="pt-2 flex justify-center gap-2">
                 {currentTask.isPaused ? (
                   <Button onClick={resumeTask} className="w-32">
                     <Play className="h-4 w-4 mr-2" /> Resume
@@ -819,6 +1063,9 @@ export default function Home() {
                     <Pause className="h-4 w-4 mr-2" /> Pause
                   </Button>
                 )}
+                <Button onClick={finishCurrentTask} variant="outline" className="w-32">
+                  <Check className="h-4 w-4 mr-2" /> Finish
+                </Button>
               </div>
             </div>
           ) : (
@@ -834,7 +1081,7 @@ export default function Home() {
       {/* Ready Queue Section */}
       <Card>
         <CardHeader>
-          <CardTitle>Ready Queue (Sorted by Virtual Runtime)</CardTitle>
+          <CardTitle>Ready Queue (Sorted by Scheduling Priority)</CardTitle>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[250px] pr-4">
@@ -846,17 +1093,25 @@ export default function Home() {
                     className="p-3 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-card hover:bg-accent/50 border"
                   >
                     <div className="flex items-center space-x-3 w-full sm:w-auto">
-                      <Badge variant="outline" className="h-6 w-6 flex items-center justify-center p-0">
-                        {task.priority}
+                      <Badge className={getProcessClassBadgeColor(task.processClass)}>
+                        {getProcessClassDisplayName(task.processClass)}
                       </Badge>
                       <div>
                         <p className="font-medium">{task.title}</p>
                         <div className="flex gap-2 text-xs text-muted-foreground">
-                          <span>{task.category.replace("-", " ")}</span>
-                          <span>•</span>
-                          <span>Nice: {task.niceValue}</span>
-                          <span>•</span>
-                          <span>VRuntime: {task.vruntime.toLocaleString()}</span>
+                          {task.processClass === "deadline" && task.deadline && (
+                            <span>Deadline: {formatDeadline(task.deadline)}</span>
+                          )}
+                          {task.processClass === "realtime" && task.rtAlgorithm && (
+                            <span>Algorithm: {task.rtAlgorithm.toUpperCase()}</span>
+                          )}
+                          {task.processClass === "normal" && (
+                            <>
+                              <span>Nice: {task.niceValue}</span>
+                              <span>•</span>
+                              <span>VRuntime: {task.vruntime?.toLocaleString() || 0}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -893,22 +1148,22 @@ export default function Home() {
           <Tabs defaultValue="all">
             <TabsList className="grid grid-cols-4 mb-4">
               <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="long-term">Long-term</TabsTrigger>
-              <TabsTrigger value="medium-term">Medium-term</TabsTrigger>
-              <TabsTrigger value="short-term">Short-term</TabsTrigger>
+              <TabsTrigger value="deadline">Deadline</TabsTrigger>
+              <TabsTrigger value="realtime">Real-Time</TabsTrigger>
+              <TabsTrigger value="normal">Normal</TabsTrigger>
             </TabsList>
 
             <TabsContent value="all">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Long-term column */}
+                {/* Deadline column */}
                 <div className="border rounded-lg p-4">
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-semibold">Long-term Processes (Daily Routine)</h3>
+                    <h3 className="font-semibold">Deadline Processes</h3>
                     <Dialog
-                      open={isAddDialogOpen && newTaskCategory === "long-term"}
+                      open={isAddDialogOpen && newTaskProcessClass === "deadline"}
                       onOpenChange={(open) => {
                         setIsAddDialogOpen(open)
-                        if (open) setNewTaskCategory("long-term")
+                        if (open) setNewTaskProcessClass("deadline")
                         if (!open) resetFormFields()
                       }}
                     >
@@ -920,56 +1175,49 @@ export default function Home() {
                       </DialogTrigger>
                       <DialogContent>
                         <DialogHeader>
-                          <DialogTitle>Add Long-term Task</DialogTitle>
+                          <DialogTitle>Add Deadline Task</DialogTitle>
                         </DialogHeader>
                         <div className="space-y-4 py-4">
                           <div className="space-y-2">
-                            <Label htmlFor="long-term-title">Title</Label>
+                            <Label htmlFor="deadline-title">Title</Label>
                             <Input
-                              id="long-term-title"
+                              id="deadline-title"
                               value={newTaskTitle}
                               onChange={(e) => setNewTaskTitle(e.target.value)}
                               placeholder="Enter task title"
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="long-term-description">Description</Label>
+                            <Label htmlFor="deadline-description">Description</Label>
                             <Input
-                              id="long-term-description"
+                              id="deadline-description"
                               value={newTaskDescription}
                               onChange={(e) => setNewTaskDescription(e.target.value)}
                               placeholder="Enter task description"
                             />
                           </div>
                           <div className="space-y-2">
-                            <div className="flex justify-between">
-                              <Label htmlFor="long-term-nice">Nice Value: {newTaskNiceValue}</Label>
-                              <span className="text-xs text-muted-foreground">(-20 to +19)</span>
-                            </div>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="pt-2 pb-1">
-                                    <Slider
-                                      id="long-term-nice"
-                                      min={-20}
-                                      max={19}
-                                      step={1}
-                                      value={[newTaskNiceValue]}
-                                      onValueChange={(value) => setNewTaskNiceValue(value[0])}
-                                    />
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>Lower values get higher priority</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
+                            <Label htmlFor="deadline-date">Deadline Date</Label>
+                            <Input
+                              id="deadline-date"
+                              type="date"
+                              value={newTaskDeadline}
+                              onChange={(e) => setNewTaskDeadline(e.target.value)}
+                            />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="long-term-quantum">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
+                            <Label htmlFor="deadline-time">Deadline Time</Label>
                             <Input
-                              id="long-term-quantum"
+                              id="deadline-time"
+                              type="time"
+                              value={newTaskDeadlineTime}
+                              onChange={(e) => setNewTaskDeadlineTime(e.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="deadline-quantum">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
+                            <Input
+                              id="deadline-quantum"
                               type="number"
                               min={1}
                               value={newTaskTimeQuantum}
@@ -991,17 +1239,17 @@ export default function Home() {
                   </div>
                   <ScrollArea className="h-[200px]">
                     <div className="space-y-2">
-                      {getTasksByCategory("long-term").map((task) => (
+                      {getTasksByProcessClass("deadline").map((task) => (
                         <div
                           key={task.id}
                           className={`p-2 border rounded-md flex justify-between items-center ${
-                            currentTask?.id === task.id ? "bg-[#e0f2fe]" : ""
+                            currentTask?.id === task.id ? "bg-red-50" : ""
                           }`}
                         >
                           <div className="truncate max-w-[70%]">
                             <span className="text-sm font-medium">{task.title}</span>
                             <div className="text-xs text-muted-foreground">
-                              Nice: {task.niceValue} | VRuntime: {task.vruntime.toLocaleString()}
+                              {task.deadline && <span>Deadline: {formatDeadline(task.deadline)}</span>}
                             </div>
                           </div>
                           <div className="flex space-x-1">
@@ -1028,22 +1276,22 @@ export default function Home() {
                           </div>
                         </div>
                       ))}
-                      {getTasksByCategory("long-term").length === 0 && (
-                        <p className="text-sm text-muted-foreground text-center py-4">No long-term tasks</p>
+                      {getTasksByProcessClass("deadline").length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-4">No deadline tasks</p>
                       )}
                     </div>
                   </ScrollArea>
                 </div>
 
-                {/* Medium-term column */}
+                {/* Real-time column */}
                 <div className="border rounded-lg p-4">
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-semibold">Medium-term Processes</h3>
+                    <h3 className="font-semibold">Real-Time Processes</h3>
                     <Dialog
-                      open={isAddDialogOpen && newTaskCategory === "medium-term"}
+                      open={isAddDialogOpen && newTaskProcessClass === "realtime"}
                       onOpenChange={(open) => {
                         setIsAddDialogOpen(open)
-                        if (open) setNewTaskCategory("medium-term")
+                        if (open) setNewTaskProcessClass("realtime")
                         if (!open) resetFormFields()
                       }}
                     >
@@ -1055,56 +1303,49 @@ export default function Home() {
                       </DialogTrigger>
                       <DialogContent>
                         <DialogHeader>
-                          <DialogTitle>Add Medium-term Task</DialogTitle>
+                          <DialogTitle>Add Real-Time Task</DialogTitle>
                         </DialogHeader>
                         <div className="space-y-4 py-4">
                           <div className="space-y-2">
-                            <Label htmlFor="medium-term-title">Title</Label>
+                            <Label htmlFor="realtime-title">Title</Label>
                             <Input
-                              id="medium-term-title"
+                              id="realtime-title"
                               value={newTaskTitle}
                               onChange={(e) => setNewTaskTitle(e.target.value)}
                               placeholder="Enter task title"
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="medium-term-description">Description</Label>
+                            <Label htmlFor="realtime-description">Description</Label>
                             <Input
-                              id="medium-term-description"
+                              id="realtime-description"
                               value={newTaskDescription}
                               onChange={(e) => setNewTaskDescription(e.target.value)}
                               placeholder="Enter task description"
                             />
                           </div>
                           <div className="space-y-2">
-                            <div className="flex justify-between">
-                              <Label htmlFor="medium-term-nice">Nice Value: {newTaskNiceValue}</Label>
-                              <span className="text-xs text-muted-foreground">(-20 to +19)</span>
-                            </div>
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="pt-2 pb-1">
-                                    <Slider
-                                      id="medium-term-nice"
-                                      min={-20}
-                                      max={19}
-                                      step={1}
-                                      value={[newTaskNiceValue]}
-                                      onValueChange={(value) => setNewTaskNiceValue(value[0])}
-                                    />
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                  <p>Lower values get higher priority</p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
+                            <Label htmlFor="realtime-algorithm">Scheduling Algorithm</Label>
+                            <RadioGroup
+                              id="realtime-algorithm"
+                              value={newTaskRTAlgorithm}
+                              onValueChange={(value: RadioGroupValue) => setNewTaskRTAlgorithm(value as RTSchedulingAlgorithm)}
+                              className="flex flex-col space-y-1"
+                            >
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="fifo" id="fifo" />
+                                <Label htmlFor="fifo">FIFO (First In, First Out)</Label>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="rr" id="rr" />
+                                <Label htmlFor="rr">RR (Round Robin)</Label>
+                              </div>
+                            </RadioGroup>
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="medium-term-quantum">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
+                            <Label htmlFor="realtime-quantum">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
                             <Input
-                              id="medium-term-quantum"
+                              id="realtime-quantum"
                               type="number"
                               min={1}
                               value={newTaskTimeQuantum}
@@ -1126,17 +1367,17 @@ export default function Home() {
                   </div>
                   <ScrollArea className="h-[200px]">
                     <div className="space-y-2">
-                      {getTasksByCategory("medium-term").map((task) => (
+                      {getTasksByProcessClass("realtime").map((task) => (
                         <div
                           key={task.id}
                           className={`p-2 border rounded-md flex justify-between items-center ${
-                            currentTask?.id === task.id ? "bg-[#e0f2fe]" : ""
+                            currentTask?.id === task.id ? "bg-purple-50" : ""
                           }`}
                         >
                           <div className="truncate max-w-[70%]">
                             <span className="text-sm font-medium">{task.title}</span>
                             <div className="text-xs text-muted-foreground">
-                              Nice: {task.niceValue} | VRuntime: {task.vruntime.toLocaleString()}
+                              Algorithm: {task.rtAlgorithm?.toUpperCase() || "FIFO"}
                             </div>
                           </div>
                           <div className="flex space-x-1">
@@ -1163,22 +1404,25 @@ export default function Home() {
                           </div>
                         </div>
                       ))}
-                      {getTasksByCategory("medium-term").length === 0 && (
-                        <p className="text-sm text-muted-foreground text-center py-4">No medium-term tasks</p>
+                      {getTasksByProcessClass("realtime").length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-4">No real-time tasks</p>
                       )}
                     </div>
                   </ScrollArea>
                 </div>
 
-                {/* Short-term column */}
+                {/* Normal column */}
                 <div className="border rounded-lg p-4">
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="font-semibold">Short-term Processes</h3>
+                    <h3 className="font-semibold">
+                      Normal Processes (CFS)
+                      <span className="text-xs text-gray-400 font-normal block">Daily Routine</span>
+                    </h3>
                     <Dialog
-                      open={isAddDialogOpen && newTaskCategory === "short-term"}
+                      open={isAddDialogOpen && newTaskProcessClass === "normal"}
                       onOpenChange={(open) => {
                         setIsAddDialogOpen(open)
-                        if (open) setNewTaskCategory("short-term")
+                        if (open) setNewTaskProcessClass("normal")
                         if (!open) resetFormFields()
                       }}
                     >
@@ -1190,22 +1434,22 @@ export default function Home() {
                       </DialogTrigger>
                       <DialogContent>
                         <DialogHeader>
-                          <DialogTitle>Add Short-term Task</DialogTitle>
+                          <DialogTitle>Add Normal Task</DialogTitle>
                         </DialogHeader>
                         <div className="space-y-4 py-4">
                           <div className="space-y-2">
-                            <Label htmlFor="short-term-title">Title</Label>
+                            <Label htmlFor="normal-title">Title</Label>
                             <Input
-                              id="short-term-title"
+                              id="normal-title"
                               value={newTaskTitle}
                               onChange={(e) => setNewTaskTitle(e.target.value)}
                               placeholder="Enter task title"
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="short-term-description">Description</Label>
+                            <Label htmlFor="normal-description">Description</Label>
                             <Input
-                              id="short-term-description"
+                              id="normal-description"
                               value={newTaskDescription}
                               onChange={(e) => setNewTaskDescription(e.target.value)}
                               placeholder="Enter task description"
@@ -1213,7 +1457,7 @@ export default function Home() {
                           </div>
                           <div className="space-y-2">
                             <div className="flex justify-between">
-                              <Label htmlFor="short-term-nice">Nice Value: {newTaskNiceValue}</Label>
+                              <Label htmlFor="normal-nice">Nice Value: {newTaskNiceValue}</Label>
                               <span className="text-xs text-muted-foreground">(-20 to +19)</span>
                             </div>
                             <TooltipProvider>
@@ -1221,12 +1465,12 @@ export default function Home() {
                                 <TooltipTrigger asChild>
                                   <div className="pt-2 pb-1">
                                     <Slider
-                                      id="short-term-nice"
+                                      id="normal-nice"
                                       min={-20}
                                       max={19}
                                       step={1}
                                       value={[newTaskNiceValue]}
-                                      onValueChange={(value) => setNewTaskNiceValue(value[0])}
+                                      onValueChange={(value: number[]) => setNewTaskNiceValue(value[0])}
                                     />
                                   </div>
                                 </TooltipTrigger>
@@ -1237,9 +1481,27 @@ export default function Home() {
                             </TooltipProvider>
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="short-term-quantum">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
+                            <Label htmlFor="normal-routine-type">Routine Type</Label>
+                            <RadioGroup
+                              id="normal-routine-type"
+                              value={newTaskRoutineType}
+                              onValueChange={(value: RadioGroupValue) => setNewTaskRoutineType(value as "default" | "daily")}
+                              className="flex flex-col space-y-1"
+                            >
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="default" id="default" />
+                                <Label htmlFor="default">Default (One-time task)</Label>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="daily" id="daily" />
+                                <Label htmlFor="daily">Daily Routine (Resets at 5 AM)</Label>
+                              </div>
+                            </RadioGroup>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="normal-quantum">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
                             <Input
-                              id="short-term-quantum"
+                              id="normal-quantum"
                               type="number"
                               min={1}
                               value={newTaskTimeQuantum}
@@ -1261,7 +1523,7 @@ export default function Home() {
                   </div>
                   <ScrollArea className="h-[200px]">
                     <div className="space-y-2">
-                      {getTasksByCategory("short-term").map((task) => (
+                      {getTasksByProcessClass("normal").map((task) => (
                         <div
                           key={task.id}
                           className={`p-2 border rounded-md flex justify-between items-center ${
@@ -1271,7 +1533,7 @@ export default function Home() {
                           <div className="truncate max-w-[70%]">
                             <span className="text-sm font-medium">{task.title}</span>
                             <div className="text-xs text-muted-foreground">
-                              Nice: {task.niceValue} | VRuntime: {task.vruntime.toLocaleString()}
+                              Nice: {task.niceValue} | VRuntime: {task.vruntime?.toLocaleString() || 0}
                             </div>
                           </div>
                           <div className="flex space-x-1">
@@ -1298,8 +1560,8 @@ export default function Home() {
                           </div>
                         </div>
                       ))}
-                      {getTasksByCategory("short-term").length === 0 && (
-                        <p className="text-sm text-muted-foreground text-center py-4">No short-term tasks</p>
+                      {getTasksByProcessClass("normal").length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-4">No normal tasks</p>
                       )}
                     </div>
                   </ScrollArea>
@@ -1307,15 +1569,15 @@ export default function Home() {
               </div>
             </TabsContent>
 
-            <TabsContent value="long-term">
+            <TabsContent value="deadline">
               <div className="border rounded-lg p-4">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-semibold">Long-term Processes (Daily Routine)</h3>
+                  <h3 className="font-semibold">Deadline Processes (EDF)</h3>
                   <Dialog
-                    open={isAddDialogOpen && newTaskCategory === "long-term"}
+                    open={isAddDialogOpen && newTaskProcessClass === "deadline"}
                     onOpenChange={(open) => {
                       setIsAddDialogOpen(open)
-                      if (open) setNewTaskCategory("long-term")
+                      if (open) setNewTaskProcessClass("deadline")
                       if (!open) resetFormFields()
                     }}
                   >
@@ -1327,56 +1589,49 @@ export default function Home() {
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Add Long-term Task</DialogTitle>
+                        <DialogTitle>Add Deadline Task</DialogTitle>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                          <Label htmlFor="long-term-title-tab">Title</Label>
+                          <Label htmlFor="deadline-title-tab">Title</Label>
                           <Input
-                            id="long-term-title-tab"
+                            id="deadline-title-tab"
                             value={newTaskTitle}
                             onChange={(e) => setNewTaskTitle(e.target.value)}
                             placeholder="Enter task title"
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="long-term-description-tab">Description</Label>
+                          <Label htmlFor="deadline-description-tab">Description</Label>
                           <Input
-                            id="long-term-description-tab"
+                            id="deadline-description-tab"
                             value={newTaskDescription}
                             onChange={(e) => setNewTaskDescription(e.target.value)}
                             placeholder="Enter task description"
                           />
                         </div>
                         <div className="space-y-2">
-                          <div className="flex justify-between">
-                            <Label htmlFor="long-term-nice-tab">Nice Value: {newTaskNiceValue}</Label>
-                            <span className="text-xs text-muted-foreground">(-20 to +19)</span>
-                          </div>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className="pt-2 pb-1">
-                                  <Slider
-                                    id="long-term-nice-tab"
-                                    min={-20}
-                                    max={19}
-                                    step={1}
-                                    value={[newTaskNiceValue]}
-                                    onValueChange={(value) => setNewTaskNiceValue(value[0])}
-                                  />
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Lower values get higher priority</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
+                          <Label htmlFor="deadline-date-tab">Deadline Date</Label>
+                          <Input
+                            id="deadline-date-tab"
+                            type="date"
+                            value={newTaskDeadline}
+                            onChange={(e) => setNewTaskDeadline(e.target.value)}
+                          />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="long-term-quantum-tab">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
+                          <Label htmlFor="deadline-time-tab">Deadline Time</Label>
                           <Input
-                            id="long-term-quantum-tab"
+                            id="deadline-time-tab"
+                            type="time"
+                            value={newTaskDeadlineTime}
+                            onChange={(e) => setNewTaskDeadlineTime(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="deadline-quantum-tab">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
+                          <Input
+                            id="deadline-quantum-tab"
                             type="number"
                             min={1}
                             value={newTaskTimeQuantum}
@@ -1397,11 +1652,8 @@ export default function Home() {
                   </Dialog>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {getTasksByCategory("long-term").map((task) => (
-                    <Card
-                      key={task.id}
-                      className={`overflow-hidden ${currentTask?.id === task.id ? "bg-[#e0f2fe]" : ""}`}
-                    >
+                  {getTasksByProcessClass("deadline").map((task) => (
+                    <Card key={task.id} className={`overflow-hidden ${currentTask?.id === task.id ? "bg-red-50" : ""}`}>
                       <CardHeader className="p-4">
                         <CardTitle className="text-base flex justify-between">
                           <span className="truncate">{task.title}</span>
@@ -1433,12 +1685,12 @@ export default function Home() {
                         <p className="text-sm text-muted-foreground line-clamp-2">{task.description}</p>
                         <div className="flex flex-col gap-2 mt-3">
                           <div className="flex justify-between items-center">
-                            <Badge variant="outline" className="text-xs">
-                              Nice: {task.niceValue}
-                            </Badge>
-                            <Badge variant="outline" className="text-xs">
-                              VRuntime: {task.vruntime.toLocaleString()}
-                            </Badge>
+                            {task.deadline && (
+                              <Badge variant="outline" className="text-xs text-red-600">
+                                <Calendar className="h-3 w-3 mr-1" />
+                                {formatDeadline(task.deadline)}
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex justify-between items-center">
                             <Badge variant="outline" className="text-xs">
@@ -1454,9 +1706,9 @@ export default function Home() {
                       </CardContent>
                     </Card>
                   ))}
-                  {getTasksByCategory("long-term").length === 0 && (
+                  {getTasksByProcessClass("deadline").length === 0 && (
                     <div className="col-span-full text-center py-8 text-muted-foreground">
-                      <p>No long-term tasks available</p>
+                      <p>No deadline tasks available</p>
                       <p className="text-sm mt-1">Add a new task to get started</p>
                     </div>
                   )}
@@ -1464,15 +1716,15 @@ export default function Home() {
               </div>
             </TabsContent>
 
-            <TabsContent value="medium-term">
+            <TabsContent value="realtime">
               <div className="border rounded-lg p-4">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-semibold">Medium-term Processes</h3>
+                  <h3 className="font-semibold">Real-Time Processes (FIFO/RR)</h3>
                   <Dialog
-                    open={isAddDialogOpen && newTaskCategory === "medium-term"}
+                    open={isAddDialogOpen && newTaskProcessClass === "realtime"}
                     onOpenChange={(open) => {
                       setIsAddDialogOpen(open)
-                      if (open) setNewTaskCategory("medium-term")
+                      if (open) setNewTaskProcessClass("realtime")
                       if (!open) resetFormFields()
                     }}
                   >
@@ -1484,56 +1736,49 @@ export default function Home() {
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Add Medium-term Task</DialogTitle>
+                        <DialogTitle>Add Real-Time Task</DialogTitle>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                          <Label htmlFor="medium-term-title-tab">Title</Label>
+                          <Label htmlFor="realtime-title-tab">Title</Label>
                           <Input
-                            id="medium-term-title-tab"
+                            id="realtime-title-tab"
                             value={newTaskTitle}
                             onChange={(e) => setNewTaskTitle(e.target.value)}
                             placeholder="Enter task title"
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="medium-term-description-tab">Description</Label>
+                          <Label htmlFor="realtime-description-tab">Description</Label>
                           <Input
-                            id="medium-term-description-tab"
+                            id="realtime-description-tab"
                             value={newTaskDescription}
                             onChange={(e) => setNewTaskDescription(e.target.value)}
                             placeholder="Enter task description"
                           />
                         </div>
                         <div className="space-y-2">
-                          <div className="flex justify-between">
-                            <Label htmlFor="medium-term-nice-tab">Nice Value: {newTaskNiceValue}</Label>
-                            <span className="text-xs text-muted-foreground">(-20 to +19)</span>
-                          </div>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className="pt-2 pb-1">
-                                  <Slider
-                                    id="medium-term-nice-tab"
-                                    min={-20}
-                                    max={19}
-                                    step={1}
-                                    value={[newTaskNiceValue]}
-                                    onValueChange={(value) => setNewTaskNiceValue(value[0])}
-                                  />
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Lower values get higher priority</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
+                          <Label htmlFor="realtime-algorithm-tab">Scheduling Algorithm</Label>
+                          <RadioGroup
+                            id="realtime-algorithm-tab"
+                            value={newTaskRTAlgorithm}
+                            onValueChange={(value: RadioGroupValue) => setNewTaskRTAlgorithm(value as RTSchedulingAlgorithm)}
+                            className="flex flex-col space-y-1"
+                          >
+                            <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="fifo" id="fifo-tab" />
+                              <Label htmlFor="fifo-tab">FIFO (First In, First Out)</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="rr" id="rr-tab" />
+                              <Label htmlFor="rr-tab">RR (Round Robin)</Label>
+                            </div>
+                          </RadioGroup>
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="medium-term-quantum-tab">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
+                          <Label htmlFor="realtime-quantum-tab">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
                           <Input
-                            id="medium-term-quantum-tab"
+                            id="realtime-quantum-tab"
                             type="number"
                             min={1}
                             value={newTaskTimeQuantum}
@@ -1554,10 +1799,10 @@ export default function Home() {
                   </Dialog>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {getTasksByCategory("medium-term").map((task) => (
+                  {getTasksByProcessClass("realtime").map((task) => (
                     <Card
                       key={task.id}
-                      className={`overflow-hidden ${currentTask?.id === task.id ? "bg-[#e0f2fe]" : ""}`}
+                      className={`overflow-hidden ${currentTask?.id === task.id ? "bg-purple-50" : ""}`}
                     >
                       <CardHeader className="p-4">
                         <CardTitle className="text-base flex justify-between">
@@ -1591,10 +1836,7 @@ export default function Home() {
                         <div className="flex flex-col gap-2 mt-3">
                           <div className="flex justify-between items-center">
                             <Badge variant="outline" className="text-xs">
-                              Nice: {task.niceValue}
-                            </Badge>
-                            <Badge variant="outline" className="text-xs">
-                              VRuntime: {task.vruntime.toLocaleString()}
+                              Algorithm: {task.rtAlgorithm?.toUpperCase() || "FIFO"}
                             </Badge>
                           </div>
                           <div className="flex justify-between items-center">
@@ -1611,9 +1853,9 @@ export default function Home() {
                       </CardContent>
                     </Card>
                   ))}
-                  {getTasksByCategory("medium-term").length === 0 && (
+                  {getTasksByProcessClass("realtime").length === 0 && (
                     <div className="col-span-full text-center py-8 text-muted-foreground">
-                      <p>No medium-term tasks available</p>
+                      <p>No real-time tasks available</p>
                       <p className="text-sm mt-1">Add a new task to get started</p>
                     </div>
                   )}
@@ -1621,15 +1863,15 @@ export default function Home() {
               </div>
             </TabsContent>
 
-            <TabsContent value="short-term">
+            <TabsContent value="normal">
               <div className="border rounded-lg p-4">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="font-semibold">Short-term Processes</h3>
+                  <h3 className="font-semibold">Normal Processes (CFS)</h3>
                   <Dialog
-                    open={isAddDialogOpen && newTaskCategory === "short-term"}
+                    open={isAddDialogOpen && newTaskProcessClass === "normal"}
                     onOpenChange={(open) => {
                       setIsAddDialogOpen(open)
-                      if (open) setNewTaskCategory("short-term")
+                      if (open) setNewTaskProcessClass("normal")
                       if (!open) resetFormFields()
                     }}
                   >
@@ -1641,22 +1883,22 @@ export default function Home() {
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
-                        <DialogTitle>Add Short-term Task</DialogTitle>
+                        <DialogTitle>Add Normal Task</DialogTitle>
                       </DialogHeader>
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
-                          <Label htmlFor="short-term-title-tab">Title</Label>
+                          <Label htmlFor="normal-title-tab">Title</Label>
                           <Input
-                            id="short-term-title-tab"
+                            id="normal-title-tab"
                             value={newTaskTitle}
                             onChange={(e) => setNewTaskTitle(e.target.value)}
                             placeholder="Enter task title"
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="short-term-description-tab">Description</Label>
+                          <Label htmlFor="normal-description-tab">Description</Label>
                           <Input
-                            id="short-term-description-tab"
+                            id="normal-description-tab"
                             value={newTaskDescription}
                             onChange={(e) => setNewTaskDescription(e.target.value)}
                             placeholder="Enter task description"
@@ -1664,7 +1906,7 @@ export default function Home() {
                         </div>
                         <div className="space-y-2">
                           <div className="flex justify-between">
-                            <Label htmlFor="short-term-nice-tab">Nice Value: {newTaskNiceValue}</Label>
+                            <Label htmlFor="normal-nice-tab">Nice Value: {newTaskNiceValue}</Label>
                             <span className="text-xs text-muted-foreground">(-20 to +19)</span>
                           </div>
                           <TooltipProvider>
@@ -1672,12 +1914,12 @@ export default function Home() {
                               <TooltipTrigger asChild>
                                 <div className="pt-2 pb-1">
                                   <Slider
-                                    id="short-term-nice-tab"
+                                    id="normal-nice-tab"
                                     min={-20}
                                     max={19}
                                     step={1}
                                     value={[newTaskNiceValue]}
-                                    onValueChange={(value) => setNewTaskNiceValue(value[0])}
+                                    onValueChange={(value: number[]) => setNewTaskNiceValue(value[0])}
                                   />
                                 </div>
                               </TooltipTrigger>
@@ -1688,9 +1930,9 @@ export default function Home() {
                           </TooltipProvider>
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="short-term-quantum-tab">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
+                          <Label htmlFor="normal-quantum-tab">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
                           <Input
-                            id="short-term-quantum-tab"
+                            id="normal-quantum-tab"
                             type="number"
                             min={1}
                             value={newTaskTimeQuantum}
@@ -1711,7 +1953,7 @@ export default function Home() {
                   </Dialog>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {getTasksByCategory("short-term").map((task) => (
+                  {getTasksByProcessClass("normal").map((task) => (
                     <Card
                       key={task.id}
                       className={`overflow-hidden ${currentTask?.id === task.id ? "bg-[#e0f2fe]" : ""}`}
@@ -1751,7 +1993,7 @@ export default function Home() {
                               Nice: {task.niceValue}
                             </Badge>
                             <Badge variant="outline" className="text-xs">
-                              VRuntime: {task.vruntime.toLocaleString()}
+                              VRuntime: {task.vruntime?.toLocaleString() || 0}
                             </Badge>
                           </div>
                           <div className="flex justify-between items-center">
@@ -1768,9 +2010,9 @@ export default function Home() {
                       </CardContent>
                     </Card>
                   ))}
-                  {getTasksByCategory("short-term").length === 0 && (
+                  {getTasksByProcessClass("normal").length === 0 && (
                     <div className="col-span-full text-center py-8 text-muted-foreground">
-                      <p>No short-term tasks available</p>
+                      <p>No normal tasks available</p>
                       <p className="text-sm mt-1">Add a new task to get started</p>
                     </div>
                   )}
@@ -1793,17 +2035,39 @@ export default function Home() {
                 {completedTasks.map((task) => (
                   <div
                     key={task.id}
-                    className="p-3 rounded-lg flex justify-between items-center bg-sky-50 border border-sky-200"
+                    className={`p-3 rounded-lg flex justify-between items-center ${
+                      task.processClass === "deadline"
+                        ? "bg-red-50 border-red-200"
+                        : task.processClass === "realtime"
+                          ? "bg-purple-50 border-purple-200"
+                          : "bg-sky-50 border-sky-200"
+                    } border`}
                   >
                     <div className="flex items-center space-x-3">
                       <Check className="h-5 w-5 text-green-500" />
                       <div>
                         <p className="font-medium">{task.title}</p>
                         <div className="flex gap-2 text-xs text-muted-foreground">
-                          <span>{task.category.replace("-", " ")}</span>
+                          <span>{getProcessClassDisplayName(task.processClass)}</span>
                           <span>•</span>
-                          <span>Nice: {task.niceValue}</span>
-                          <span>•</span>
+                          {task.processClass === "deadline" && task.deadline && (
+                            <>
+                              <span>Deadline: {formatDate(task.deadline)}</span>
+                              <span>•</span>
+                            </>
+                          )}
+                          {task.processClass === "realtime" && task.rtAlgorithm && (
+                            <>
+                              <span>Algorithm: {task.rtAlgorithm.toUpperCase()}</span>
+                              <span>•</span>
+                            </>
+                          )}
+                          {task.processClass === "normal" && task.niceValue !== undefined && (
+                            <>
+                              <span>Nice: {task.niceValue}</span>
+                              <span>•</span>
+                            </>
+                          )}
                           <span>Completed: {formatDate(task.completedAt)}</span>
                         </div>
                       </div>
@@ -1855,43 +2119,81 @@ export default function Home() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-category">Category</Label>
+              <Label htmlFor="edit-process-class">Process Class</Label>
               <select
-                id="edit-category"
+                id="edit-process-class"
                 className="w-full p-2 border rounded-md"
-                value={newTaskCategory}
-                onChange={(e) => setNewTaskCategory(e.target.value as "long-term" | "medium-term" | "short-term")}
+                value={newTaskProcessClass}
+                onChange={(e) => setNewTaskProcessClass(e.target.value as ProcessClass)}
               >
-                <option value="long-term">Long-term</option>
-                <option value="medium-term">Medium-term</option>
-                <option value="short-term">Short-term</option>
+                <option value="deadline">Deadline</option>
+                <option value="realtime">Real-Time</option>
+                <option value="normal">Normal</option>
               </select>
             </div>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <Label htmlFor="edit-nice">Nice Value: {newTaskNiceValue}</Label>
-                <span className="text-xs text-muted-foreground">(-20 to +19)</span>
+
+            {/* Class-specific fields */}
+            {newTaskProcessClass === "deadline" && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-deadline">Deadline Date</Label>
+                <Input
+                  id="edit-deadline"
+                  type="date"
+                  value={newTaskDeadline}
+                  onChange={(e) => setNewTaskDeadline(e.target.value)}
+                />
               </div>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="pt-2 pb-1">
-                      <Slider
-                        id="edit-nice"
-                        min={-20}
-                        max={19}
-                        step={1}
-                        value={[newTaskNiceValue]}
-                        onValueChange={(value) => setNewTaskNiceValue(value[0])}
-                      />
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>Lower values get higher priority</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
+            )}
+
+            {newTaskProcessClass === "realtime" && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-rt-algorithm">Scheduling Algorithm</Label>
+                <RadioGroup
+                  id="edit-rt-algorithm"
+                  value={newTaskRTAlgorithm}
+                  onValueChange={(value: RadioGroupValue) => setNewTaskRTAlgorithm(value as RTSchedulingAlgorithm)}
+                  className="flex flex-col space-y-1"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="fifo" id="edit-fifo" />
+                    <Label htmlFor="edit-fifo">FIFO (First In, First Out)</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="rr" id="edit-rr" />
+                    <Label htmlFor="edit-rr">RR (Round Robin)</Label>
+                  </div>
+                </RadioGroup>
+              </div>
+            )}
+
+            {newTaskProcessClass === "normal" && (
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <Label htmlFor="edit-nice">Nice Value: {newTaskNiceValue}</Label>
+                  <span className="text-xs text-muted-foreground">(-20 to +19)</span>
+                </div>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="pt-2 pb-1">
+                        <Slider
+                          id="edit-nice"
+                          min={-20}
+                          max={19}
+                          step={1}
+                          value={[newTaskNiceValue]}
+                          onChange={(value: number[]) => setNewTaskNiceValue(value[0])}
+                        />
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Lower values get higher priority</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="edit-quantum">Time Quantum (minutes): {newTaskTimeQuantum}</Label>
               <Input
@@ -1951,9 +2253,6 @@ export default function Home() {
             >
               {taskToSwitch ? "Cancel" : "Add 5 minutes of Time Quantum"}
             </AlertDialogCancel>
-            {/* Fix the task switching logic in the AlertDialogAction onClick handler:
-            // Replace the onClick handler in the Task Switch Confirmation Dialog with: */}
-
             <AlertDialogAction
               onClick={() => {
                 if (taskToSwitch) {
@@ -1965,7 +2264,7 @@ export default function Home() {
 
                     // Store the next task before removing the current one
                     const tasksWithoutCurrent = tasks.filter((task) => task.id !== currentTaskId)
-                    const nextTask = [...tasksWithoutCurrent].sort((a, b) => a.vruntime - b.vruntime)[0]
+                    const nextTask = getNextTaskToRun()
 
                     // First update the tasks state to remove the current task
                     setTasks(tasksWithoutCurrent)
@@ -1980,19 +2279,20 @@ export default function Home() {
                         id: taskToComplete.id,
                         title: taskToComplete.title,
                         description: taskToComplete.description,
-                        category: taskToComplete.category,
+                        processClass: taskToComplete.processClass,
                         completedAt: new Date(),
                         totalTime: taskToComplete.elapsedTime,
+                        deadline: taskToComplete.deadline,
+                        rtAlgorithm: taskToComplete.rtAlgorithm,
                         niceValue: taskToComplete.niceValue,
+                        routineType: taskToComplete.routineType,
                       }
 
                       setCompletedTasks((prev) => [completedTask, ...prev])
 
                       // Show notification
-                      toast({
-                        title: "Task Completed",
+                      toast.success("Task Completed", {
                         description: `"${taskToComplete.title}" has been completed.`,
-                        variant: "default",
                       })
                     }
 
@@ -2007,13 +2307,11 @@ export default function Home() {
                 }
               }}
             >
-              {taskToSwitch ? "Yes, Interrupt & Switch Task" : "End task and switch to next"}
+              {taskToSwitch ? "Yes, Switch Task" : "End task and switch to next"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <Toaster />
     </main>
   )
 }
