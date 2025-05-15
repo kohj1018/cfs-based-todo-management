@@ -1,36 +1,25 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Linux-Like TODO Management
 
-## Getting Started
+Linux의 스케줄링 알고리즘을 기반으로 한 TODO 관리 애플리케이션입니다.
 
-First, run the development server:
+## 주요 기능
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Deadline 태스크**: EDF (Earliest Deadline First) 알고리즘 사용
+- **Real-time 태스크**: FIFO/RR (Round Robin) 알고리즘 지원
+- **Normal 태스크**: CFS (Completely Fair Scheduler) 알고리즘 사용
+- **일일 루틴**: 매일 자동으로 리셋되는 태스크 관리
+- **시간 양자(Time Quantum) 관리**: 태스크별 실행 시간 제어
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 기술 스택
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Next.js
+- TypeScript
+- Tailwind CSS
+- Shadcn UI
+- Sonner (Toast 알림)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 프로젝트 구조
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `app/page.tsx`: 메인 애플리케이션 컴포넌트
+- `components/ui/`: UI 컴포넌트
+- `public/`: 정적 파일
