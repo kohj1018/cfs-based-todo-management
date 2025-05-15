@@ -2182,7 +2182,7 @@ export default function Home() {
                           max={19}
                           step={1}
                           value={[newTaskNiceValue]}
-                          onChange={(value: number[]) => setNewTaskNiceValue(value[0])}
+                          onValueChange={(value: number[]) => setNewTaskNiceValue(value[0])}
                         />
                       </div>
                     </TooltipTrigger>
